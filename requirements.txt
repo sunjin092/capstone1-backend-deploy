@@ -1,5 +1,3 @@
---no-cache-dir
-
 torch
 torchvision
 fastapi
