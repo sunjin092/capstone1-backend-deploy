@@ -10,6 +10,7 @@ import os
 import zipfile
 import requests
 
+# ✅ 체크포인트 zip 자동 다운로드
 def download_checkpoints():
     url = "https://drive.google.com/uc?id=1uR2MqrKcm9K4PxAEVD-giXIEQX82H5ZV"
     zip_path = "checkpoint.zip"
@@ -24,25 +25,23 @@ def download_checkpoints():
         os.remove(zip_path)
         print("✅ 체크포인트 다운로드 완료!")
 
-# 앱 시작 전에 자동 실행
 download_checkpoints()
-
 
 app = FastAPI()
 
+# CORS 허용 설정
 origins = [
-    "http://localhost:3000",  # 프론트엔드가 실행되는 주소
-    "https://jiwow-wow.github.io"  # GitHub Pages 주소 (배포 시)
+    "http://localhost:3000",
+    "https://jiwow-wow.github.io"
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # 허용할 오리진 목록
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # 화장품 CSV 로드
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
@@ -50,12 +49,9 @@ products = pd.read_csv("Total_DB.csv", encoding='cp949')
 # 추천 함수
 def recommend_products(result):
     regions = result.get("regions", {})
-    skin_type = result.get("skin_type", "중성")
-
-    if not regions or not skin_type:
+    if not regions:
         return []
 
-    # 평균 계산
     try:
         moisture_avg = np.mean([
             regions['이마']['수분'],
@@ -77,7 +73,6 @@ def recommend_products(result):
     except:
         return []
 
-    # 고민 우선순위 계산
     concern_scores = {
         '모공': (pore_avg - 500) / 500 if pore_avg >= 500 else 0,
         '주름': (50 - elasticity_avg) / 50 if elasticity_avg <= 50 else 0,
@@ -86,7 +81,6 @@ def recommend_products(result):
     }
     user_concerns = [k for k, v in sorted(concern_scores.items(), key=lambda x: x[1], reverse=True) if v > 0]
 
-    # 키워드 사전
     concern_keywords = {
         '모공': ['모공', '피지','노폐물','피부결','각질'],
         '주름': ['주름', '탄력','영양공급','피부활력','피부재생','나이트','아이'],
@@ -101,13 +95,13 @@ def recommend_products(result):
         '중성': []
     }
 
-    # 점수 계산
     def score_product(row):
         tags = str(row['태그'])
         detail = str(row.get('세부', ''))
         score = 0
 
-        for block_word in exclude_keywords.get(skin_type, []):
+        # 피부타입 없으므로 제외 조건 적용 안 함
+        for block_word in []:
             if block_word in detail or block_word in tags:
                 return -1
 
@@ -119,18 +113,18 @@ def recommend_products(result):
                     score += weight
         return score
 
-    # 추천 추출
     products['score'] = products.apply(score_product, axis=1)
     top5 = products[products['score'] >= 0].sort_values(by='score', ascending=False).head(5)
 
     return top5[['브랜드', '제품명', '용량/가격', '별점', '이미지']].to_dict(orient='records')
 
-# FastAPI 엔드포인트
+# ✅ FastAPI 엔드포인트
 @app.post("/analyze-recommend")
 async def analyze_and_recommend(file: UploadFile = File(...)):
     image_bytes = await file.read()
     try:
         result = run_analysis(image_bytes)
+        result.pop("skin_type", None)  # ✅ skin_type 제거
         recommended = recommend_products(result)
         return JSONResponse(content={"analysis": result, "recommend": recommended})
     except Exception as e:
