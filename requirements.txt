@@ -3,7 +3,7 @@ torchvision
 fastapi
 uvicorn
 pandas
-opencv-python
+opencv-python-headless
 matplotlib
 scikit-learn
 Pillow
