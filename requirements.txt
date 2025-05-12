@@ -1,8 +1,10 @@
+torch
+torchvision
 fastapi
 uvicorn
 pandas
-numpy
-torch
 opencv-python
+matplotlib
+scikit-learn
 Pillow
 mediapipe
