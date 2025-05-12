@@ -47,6 +47,7 @@ app.add_middleware(
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
 # 추천 함수
+
 def recommend_products(result):
     regions = result.get("regions", {})
     if not regions:
@@ -87,23 +88,11 @@ def recommend_products(result):
         '수분': ['수분', '보습'],
         '색소침착': ['미백', '브라이트닝', '비타민', '피부톤', '투명','트러블케어','피부재생','피부보호','스팟','저자극','진정']
     }
-    exclude_keywords = {
-        '지성': ['페이스오일', '멀티밤', '보습크림', '나이트크림'],
-        '건성': ['워터토너', '브라이트닝'],
-        '복합건성': [],
-        '복합지성': [],
-        '중성': []
-    }
-
+    
     def score_product(row):
         tags = str(row['태그'])
         detail = str(row.get('세부', ''))
         score = 0
-
-        # 피부타입 없으므로 제외 조건 적용 안 함
-        for block_word in []:
-            if block_word in detail or block_word in tags:
-                return -1
 
         weights = [3, 2, 1]
         for idx, concern in enumerate(user_concerns):
@@ -124,7 +113,6 @@ async def analyze_and_recommend(file: UploadFile = File(...)):
     image_bytes = await file.read()
     try:
         result = run_analysis(image_bytes)
-        result.pop("skin_type", None)  # ✅ skin_type 제거
         recommended = recommend_products(result)
         return JSONResponse(content={"analysis": result, "recommend": recommended})
     except Exception as e:

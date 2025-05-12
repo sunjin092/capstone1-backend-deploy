@@ -10,18 +10,15 @@ import io
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# 경로
-regression_ckpt = "C:/Users/ADMIN/Downloads/project/checkpoint/regression"
+# ✅ 상대경로로 수정
+regression_ckpt = os.path.join("checkpoint", "regression")
 regression_num_output = [1, 2, 0, 0, 0, 3, 3, 0, 2]
-skin_ckpt = "C:/Users/ADMIN/Downloads/project/checkpoint/class/skin_type/state_dict.bin"
-skin_label_names = ['건성', '복합건성', '복합지성', '중성', '지성']
 
 # 이미지 전처리
 transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406],
-                         [0.229, 0.224, 0.225])
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
 # 결과 복원 기준
@@ -57,6 +54,7 @@ REGION_LANDMARKS = {
     7: [13, 14, 17, 84, 181],
     8: [152, 377, 400, 378, 379]
 }
+
 def crop_regions_by_ratio(pil_img, visualize=False):
     img = np.array(pil_img)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
@@ -89,7 +87,7 @@ def crop_regions_by_ratio(pil_img, visualize=False):
             regions[idx] = Image.fromarray(crop)
     return regions
 
-# 모델 불러오기
+# 회귀 모델만 불러오기
 reg_models = []
 for idx, out_dim in enumerate(regression_num_output):
     if out_dim == 0:
@@ -108,13 +106,8 @@ for idx, out_dim in enumerate(regression_num_output):
     else:
         reg_models.append(None)
 
-skin_model = models.resnet50(weights=None)
-skin_model.fc = nn.Linear(skin_model.fc.in_features, len(skin_label_names))
-skin_model.load_state_dict(torch.load(skin_ckpt, map_location=device))
-skin_model.eval()
-skin_model = skin_model.to(device)
+# ✅ 분석 함수
 
-# ✅ FastAPI 호출용 함수
 def run_analysis(image_bytes):
     result = {}
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -123,15 +116,6 @@ def run_analysis(image_bytes):
         regions = crop_regions_by_ratio(image, visualize=False)
     except Exception as e:
         return {"error": f"얼굴 인식 실패: {str(e)}"}
-
-    if regions[0] is not None:
-        overall_tensor = transform(regions[0]).unsqueeze(0).to(device)
-        with torch.no_grad():
-            skin_out = skin_model(overall_tensor)
-            skin_pred = torch.argmax(skin_out, dim=1).item()
-            result["skin_type"] = skin_label_names[skin_pred]
-    else:
-        result["skin_type"] = None
 
     region_results = {}
     for idx in range(9):
