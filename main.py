@@ -31,7 +31,8 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
-    "https://jiwow-wow.github.io"
+    "https://jiwow-wow.github.io",
+    "https://front-seven-chi.vercel.app"  # ✅ 네 Vercel 프론트 주소 추가됨
 ]
 
 app.add_middleware(
@@ -140,7 +141,6 @@ async def analyze_and_recommend(file: UploadFile = File(...)):
         result = run_analysis(image_bytes)
         recommended = recommend_products(result)
 
-        # ✅ JSON 직렬화 강제 점검
         response_data = {"analysis": result, "recommend": recommended}
         safe_json = json.dumps(response_data, ensure_ascii=False, allow_nan=False)
         return JSONResponse(content=json.loads(safe_json))
