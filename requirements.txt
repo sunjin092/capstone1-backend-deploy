@@ -10,3 +10,4 @@ Pillow
 mediapipe
 requests
 gdown
+python-multipart
