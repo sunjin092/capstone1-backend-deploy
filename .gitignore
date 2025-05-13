@@ -2,7 +2,6 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
-*.bin
 *.pt
 *.pth
 checkpoint.zip
