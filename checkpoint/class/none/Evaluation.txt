@@ -1,0 +1,4 @@
+2023-11-28 22:20:50,868 Namespace(angle='all', batch_size=1, best_loss=[inf, inf, inf, inf, inf, inf, inf, inf, inf], double=False, epoch=300, equ=[1, 2, 3], img_path='dataset/img', json_path='dataset/label', load_epoch=0, loss_dir='tensorboard', lr=0.001, mode='class', name='none', num_workers=4, output_dir='checkpoint', res=128, reset=False, stop_early=30)
+2023-11-28 22:20:57,033 Train Dataset => 9 // Valid Dataset => 1
+2023-11-28 22:25:08,152 Namespace(angle='all', batch_size=1, best_loss=[inf, inf, inf, inf, inf, inf, inf, inf, inf], double=False, epoch=300, equ=[1, 2, 3], img_path='dataset/img', json_path='dataset/label', load_epoch=0, loss_dir='tensorboard', lr=0.001, mode='class', name='none', num_workers=4, output_dir='checkpoint', res=128, reset=False, stop_early=30)
+2023-11-28 22:25:14,194 Train Dataset => 9 // Valid Dataset => 1

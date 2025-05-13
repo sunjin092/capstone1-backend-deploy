@@ -7,24 +7,10 @@ import numpy as np
 from io import BytesIO
 from fastapi.middleware.cors import CORSMiddleware
 import os
-import zipfile
-import gdown
-
-# ✅ 체크포인트 zip 자동 다운로드 (gdown 사용)
-def download_checkpoints():
-    if not os.path.exists("checkpoint"):
-        print("📦 체크포인트 다운로드 중...")
-        gdown.download(id="1uR2MqrKcm9K4PxAEVD-giXIEQX82H5ZV", output="checkpoint.zip", quiet=False)
-        with zipfile.ZipFile("checkpoint.zip", "r") as zip_ref:
-            zip_ref.extractall()
-        os.remove("checkpoint.zip")
-        print("✅ 체크포인트 다운로드 완료!")
-
-download_checkpoints()
 
 app = FastAPI()
 
-# CORS 허용 설정
+# ✅ CORS 허용 설정
 origins = [
     "http://localhost:3000",
     "https://jiwow-wow.github.io"
@@ -38,11 +24,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 화장품 CSV 로드
+# ✅ 화장품 CSV 로드
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
-# 추천 함수
-
+# ✅ 추천 함수
 def recommend_products(result):
     regions = result.get("regions", {})
     if not regions:
@@ -83,12 +68,11 @@ def recommend_products(result):
         '수분': ['수분', '보습'],
         '색소침착': ['미백', '브라이트닝', '비타민', '피부톤', '투명','트러블케어','피부재생','피부보호','스팟','저자극','진정']
     }
-    
+
     def score_product(row):
         tags = str(row['태그'])
         detail = str(row.get('세부', ''))
         score = 0
-
         weights = [3, 2, 1]
         for idx, concern in enumerate(user_concerns):
             weight = weights[idx] if idx < len(weights) else 1
