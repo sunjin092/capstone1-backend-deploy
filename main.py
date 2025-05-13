@@ -8,21 +8,16 @@ from io import BytesIO
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import zipfile
-import requests
+import gdown
 
-# ✅ 체크포인트 zip 자동 다운로드
+# ✅ 체크포인트 zip 자동 다운로드 (gdown 사용)
 def download_checkpoints():
-    url = "https://drive.google.com/uc?id=1uR2MqrKcm9K4PxAEVD-giXIEQX82H5ZV"
-    zip_path = "checkpoint.zip"
-
     if not os.path.exists("checkpoint"):
         print("📦 체크포인트 다운로드 중...")
-        r = requests.get(url)
-        with open(zip_path, "wb") as f:
-            f.write(r.content)
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        gdown.download(id="1uR2MqrKcm9K4PxAEVD-giXIEQX82H5ZV", output="checkpoint.zip", quiet=False)
+        with zipfile.ZipFile("checkpoint.zip", "r") as zip_ref:
             zip_ref.extractall()
-        os.remove(zip_path)
+        os.remove("checkpoint.zip")
         print("✅ 체크포인트 다운로드 완료!")
 
 download_checkpoints()
