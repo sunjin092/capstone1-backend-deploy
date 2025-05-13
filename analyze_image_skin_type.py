@@ -89,11 +89,9 @@ def crop_regions_by_ratio(pil_img, visualize=False):
     return regions
 
 # 회귀 모델만 불러오기
-reg_models = []
-for idx, out_dim in enumerate(regression_num_output):
-    if out_dim == 0:
-        reg_models.append(None)
-        continue
+reg_models = [None] * 9
+for idx in [0, 1, 5, 6, 8]:
+    out_dim = regression_num_output[idx]
     model = models.resnet50(weights=None)
     model.fc = nn.Linear(model.fc.in_features, out_dim)
     ckpt_path = os.path.join(regression_ckpt, str(idx), "state_dict.bin")
@@ -103,9 +101,7 @@ for idx, out_dim in enumerate(regression_num_output):
             state = state["model_state"]
         model.load_state_dict(state, strict=False)
         model.eval()
-        reg_models.append(model.to(device))
-    else:
-        reg_models.append(None)
+        reg_models[idx] = model.to(device)
 
 # ✅ 분석 함수
 
@@ -119,16 +115,13 @@ def run_analysis(image_bytes):
         return {"error": f"얼굴 인식 실패: {str(e)}"}
 
     region_results = {}
-    for idx in range(9):
+    for idx in [0, 1, 5, 6, 8]:
         print(f"🔍 영역 {idx} 분석 중...")
         if reg_models[idx] is None:
             print(f"⚠️  reg_model[{idx}] is None → SKIP")
             continue
         if regions[idx] is None:
             print(f"⚠️  regions[{idx}] is None → SKIP")
-            continue
-        if idx in [3, 4]:
-            print(f"⚠️  idx {idx}는 제외 설정됨 → SKIP")
             continue
 
         crop_tensor = transform(regions[idx]).unsqueeze(0).to(device)
@@ -162,4 +155,3 @@ def run_analysis(image_bytes):
                 region[k] = 0
 
     return result
-
