@@ -119,13 +119,23 @@ def run_analysis(image_bytes):
 
     region_results = {}
     for idx in range(9):
-        if reg_models[idx] is None or regions[idx] is None or idx in [3, 4]:
+        print(f"🔍 영역 {idx} 분석 중...")
+        if reg_models[idx] is None:
+            print(f"⚠️  reg_model[{idx}] is None → SKIP")
             continue
+        if regions[idx] is None:
+            print(f"⚠️  regions[{idx}] is None → SKIP")
+            continue
+        if idx in [3, 4]:
+            print(f"⚠️  idx {idx}는 제외 설정됨 → SKIP")
+            continue
+
         crop_tensor = transform(regions[idx]).unsqueeze(0).to(device)
         with torch.no_grad():
             reg_out = reg_models[idx](crop_tensor).squeeze().cpu().numpy()
         if reg_out.ndim == 0:
             reg_out = [reg_out]
+
         area_name = area_label[idx]
         values = {}
         for i, val in enumerate(reg_out):
@@ -139,6 +149,9 @@ def run_analysis(image_bytes):
                 val *= 300
             values[label] = round(float(val), 2)
         region_results[area_name] = values
+        print(f"✅ {area_name} 결과: {values}")
 
+    print("🟢 전체 결과:", region_results)
     result["regions"] = region_results
     return result
+
