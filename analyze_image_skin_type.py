@@ -7,6 +7,7 @@ import torch.nn as nn
 import cv2
 import mediapipe as mp
 import io
+import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -153,5 +154,12 @@ def run_analysis(image_bytes):
 
     print("🟢 전체 결과:", region_results)
     result["regions"] = region_results
+
+    # ✅ JSON 직렬화 가능한 값으로 정리
+    for region in result["regions"].values():
+        for k, v in region.items():
+            if not math.isfinite(v):  # nan, inf, -inf 방지
+                region[k] = 0
+
     return result
 
