@@ -1,49 +1,45 @@
-import torch
-import os
-import numpy as np
-from torchvision import models, transforms
+# ✅ analyze_image_skin_type.py (새 CV 모델 기반)
+
+import os, torch, numpy as np
 from PIL import Image, ImageOps
+import pandas as pd
+from torchvision import transforms, models
 import torch.nn as nn
 import cv2
 import mediapipe as mp
-import io
-import math
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# ✅ 상대경로로 수정
-regression_ckpt = os.path.join("checkpoint", "regression")
-regression_num_output = [1, 2, 0, 0, 0, 3, 3, 0, 2]
-
-# 이미지 전처리
 transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-# 결과 복원 기준
-restore_stats = {
-    1: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9)},
-    5: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9), "모공 개수": "log"},
-    6: {"수분": (60.2, 9.6), "탄력": (49.3, 12.1), "모공 개수": "log"},
-    8: {"수분": (61.3, 10.0), "탄력": (47.5, 12.0)},
-    0: {"색소침착 개수": 300}
-}
-area_label = {
-    0: "전체", 1: "이마", 2: "미간", 3: "왼쪽 눈가", 4: "오른쪽 눈가",
-    5: "왼쪽 볼", 6: "오른쪽 볼", 7: "입술", 8: "턱"
-}
-reg_desc = {
-    0: ["색소침착 개수"],
-    1: ["수분", "탄력"],
-    5: ["수분", "탄력", "모공 개수"],
-    6: ["수분", "탄력", "모공 개수"],
-    8: ["수분", "탄력"]
-}
+regression_ckpt = os.path.join("checkpoint", "regression")
+regression_num_output = [1, 2, 0, 0, 0, 3, 3, 0, 2]
 
-# Mediapipe 얼굴 영역 crop
-mp_face_mesh = mp.solutions.face_mesh
+area_label = {0: "전체", 1: "이마", 2: "미간", 3: "왼쪽 눈가", 4: "오른쪽 눈가", 5: "왼쪽 볼", 6: "오른쪽 볼", 7: "입술", 8: "턱"}
+reg_desc = {0: ["색소침착 개수"], 1: ["수분", "탄력"], 5: ["수분", "탄력", "모공 개수"], 6: ["수분", "탄력", "모공 개수"], 8: ["수분", "탄력"]}
+
+skin_label_names = ["건성", "복합건성", "중성", "복합지성", "지성"]
+
+# Dummy skin type model (for structure)
+skin_model = models.resnet18(weights=None)
+skin_model.fc = nn.Linear(skin_model.fc.in_features, len(skin_label_names))
+skin_model.eval()
+
+
+def get_restore_stats():
+    return {
+        1: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9)},
+        5: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9), "모공 개수": "log"},
+        6: {"수분": (60.2, 9.6), "탄력": (49.3, 12.1), "모공 개수": "log"},
+        8: {"수분": (61.3, 10.0), "탄력": (47.5, 12.0)},
+        0: {"색소침착 개수": 300}
+    }
+
 REGION_LANDMARKS = {
     0: list(range(468)),
     1: [10, 67, 69, 71, 109, 151, 337, 338, 297],
@@ -56,12 +52,12 @@ REGION_LANDMARKS = {
     8: [152, 377, 400, 378, 379]
 }
 
-def crop_regions_by_ratio(pil_img, visualize=False):
+def crop_regions_by_ratio(pil_img):
     img = np.array(pil_img)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     h, w = img.shape[:2]
     regions = [None] * 9
-    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as face_mesh:
+    with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as face_mesh:
         results = face_mesh.process(img_rgb)
         if not results.multi_face_landmarks:
             raise ValueError("❗ 얼굴을 찾을 수 없습니다.")
@@ -88,10 +84,17 @@ def crop_regions_by_ratio(pil_img, visualize=False):
             regions[idx] = Image.fromarray(crop)
     return regions
 
-# 회귀 모델만 불러오기
-reg_models = [None] * 9
-for idx in [0, 1, 5, 6, 8]:
-    out_dim = regression_num_output[idx]
+def compute_z_score(value, mean, std):
+    if std == 0: return 0
+    return round((value - mean) / std, 2)
+
+# ✅ 모델 불러오기
+reg_models = []
+restore_stats = get_restore_stats()
+for idx, out_dim in enumerate(regression_num_output):
+    if out_dim == 0:
+        reg_models.append(None)
+        continue
     model = models.resnet50(weights=None)
     model.fc = nn.Linear(model.fc.in_features, out_dim)
     ckpt_path = os.path.join(regression_ckpt, str(idx), "state_dict.bin")
@@ -101,57 +104,98 @@ for idx in [0, 1, 5, 6, 8]:
             state = state["model_state"]
         model.load_state_dict(state, strict=False)
         model.eval()
-        reg_models[idx] = model.to(device)
+        reg_models.append(model.to(device))
+    else:
+        reg_models.append(None)
 
-# ✅ 분석 함수
+# ✅ 메인 함수: 이미지 + 성별_연령대 → 결과 리턴
+def model_image(image: Image.Image, gender_age: str, average_data_path="average_data.csv") -> dict:
+    image = ImageOps.exif_transpose(image.convert("RGB"))
+    regions = crop_regions_by_ratio(image)
+    result = {"regions": {}, "z_scores": {}, "skin_type": None, "priority_concern": None}
 
-def run_analysis(image_bytes):
-    result = {}
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = ImageOps.exif_transpose(image)
-    try:
-        regions = crop_regions_by_ratio(image, visualize=False)
-    except Exception as e:
-        return {"error": f"얼굴 인식 실패: {str(e)}"}
+    df = pd.read_csv(average_data_path, encoding='cp949')
+    avg_data = {}
+    for _, row in df.iterrows():
+        key = row["성별"]
+        avg_data[key] = {
+            "mean": {
+                "수분_이마": row["수분_이마"],
+                "수분_왼쪽 볼": row["수분_왼쪽 볼"],
+                "수분_오른쪽 볼": row["수분_오른쪽 볼"],
+                "수분_턱": row["수분_턱"],
+                "탄력_이마": row["탄력_이마"],
+                "탄력_왼쪽 볼": row["탄력_왼쪽 볼"],
+                "탄력_오른쪽 볼": row["탄력_오른쪽 볼"],
+                "탄력_턱": row["탄력_턱"],
+                "모공 개수_왼쪽 볼": row["모공 개수_왼쪽 볼"],
+                "모공 개수_오른쪽 볼": row["모공 개수_오른쪽 볼"],
+                "색소침착 개수_스팟개수": 130
+            },
+            "std": {
+                "수분_이마": row["수분_이마_표준편차"],
+                "수분_왼쪽 볼": row["수분_왼쪽 볼_표준편차"],
+                "수분_오른쪽 볼": row["수분_오른쪽 볼_표준편차"],
+                "수분_턱": row["수분_턱_표준편차"],
+                "탄력_이마": row["탄력_이마_표준편차"],
+                "탄력_왼쪽 볼": row["탄력_왼쪽 볼_표준편차"],
+                "탄력_오른쪽 볼": row["탄력_오른쪽 볼_표준편차"],
+                "탄력_턱": row["탄력_턱_표준편차"],
+                "모공 개수_왼쪽 볼": row["모공 개수_왼쪽 볼_표준편차"],
+                "모공 개수_오른쪽 볼": row["모공 개수_오른쪽 볼_표준편차"],
+                "색소침착 개수_스팟개수": row["색소침착 개수_스팟개수_표준편차"]
+            }
+        }
 
-    region_results = {}
-    for idx in [0, 1, 5, 6, 8]:
-        print(f"🔍 영역 {idx} 분석 중...")
-        if reg_models[idx] is None:
-            print(f"⚠️  reg_model[{idx}] is None → SKIP")
+    if gender_age not in avg_data:
+        raise ValueError(f"❗ 평균 데이터에 '{gender_age}' 항목이 없습니다.")
+
+    mean_dict = avg_data[gender_age]["mean"]
+    std_dict = avg_data[gender_age]["std"]
+    z_score_list = []
+
+    for idx in range(9):
+        if reg_models[idx] is None or regions[idx] is None or idx in [3, 4]:
             continue
-        if regions[idx] is None:
-            print(f"⚠️  regions[{idx}] is None → SKIP")
-            continue
-
         crop_tensor = transform(regions[idx]).unsqueeze(0).to(device)
         with torch.no_grad():
-            reg_out = reg_models[idx](crop_tensor).squeeze().cpu().numpy()
-        if reg_out.ndim == 0:
-            reg_out = [reg_out]
-
-        area_name = area_label[idx]
-        values = {}
-        for i, val in enumerate(reg_out):
+            output = reg_models[idx](crop_tensor).squeeze().cpu().numpy()
+        if output.ndim == 0:
+            output = [output]
+        sub_result, sub_zscore = {}, {}
+        for i, val in enumerate(output):
             label = reg_desc[idx][i]
             if label == "모공 개수" and restore_stats[idx].get(label) == "log":
                 val = np.clip(np.exp(val) - 1, 0, 2500)
-            elif label in restore_stats[idx] and isinstance(restore_stats[idx][label], tuple):
+            elif isinstance(restore_stats[idx].get(label), tuple):
                 mean, std = restore_stats[idx][label]
                 val = val * std + mean
             elif label == "색소침착 개수":
                 val *= 300
-            values[label] = round(float(val), 2)
-        region_results[area_name] = values
-        print(f"✅ {area_name} 결과: {values}")
+            val = float(val)
+            sub_result[label] = round(val, 2)
+            z_key = f"{label}_{area_label[idx]}" if label != "색소침착 개수" else "스팟개수"
+            if z_key in mean_dict:
+                z = compute_z_score(val, mean_dict[z_key], std_dict[z_key])
+                sub_zscore[label] = z
+                z_score_list.append((label, area_label[idx], z))
+        result["regions"][area_label[idx]] = sub_result
+        if sub_zscore:
+            result["z_scores"][area_label[idx]] = sub_zscore
 
-    print("🟢 전체 결과:", region_results)
-    result["regions"] = region_results
+    if regions[0] is not None:
+        overall_tensor = transform(regions[0]).unsqueeze(0).to(device)
+        with torch.no_grad():
+            pred = torch.argmax(skin_model(overall_tensor), dim=1).item()
+            result["skin_type"] = skin_label_names[pred]
 
-    # ✅ JSON 직렬화 가능한 값으로 정리
-    for region in result["regions"].values():
-        for k, v in region.items():
-            if not math.isfinite(v):  # nan, inf, -inf 방지
-                region[k] = 0
+    concerns = []
+    for label, area, z in z_score_list:
+        if label in ["수분", "탄력"] and z < -0.2:
+            concerns.append((label, area, z))
+        elif label in ["모공 개수", "색소침착 개수"] and z > 0.2:
+            concerns.append((label, area, z))
+    if concerns:
+        result["priority_concern"] = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)[0]
 
     return result

@@ -1,40 +1,25 @@
-from fastapi import FastAPI, UploadFile, File
+# ✅ main.py (추천 시스템 완전 교체 + concerns 입력 연동)
+
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 import pandas as pd
 import json
-from analyze_image_skin_type import run_analysis
+import io
 import numpy as np
-from io import BytesIO
-from fastapi.middleware.cors import CORSMiddleware
-import os
-import zipfile
-import requests
 import math
-
-def download_checkpoints():
-    url = "https://drive.google.com/uc?id=1uR2MqrKcm9K4PxAEVD-giXIEQX82H5ZV"
-    zip_path = "checkpoint.zip"
-
-    if not os.path.exists("checkpoint"):
-        print("📦 체크포인트 다운로드 중...")
-        r = requests.get(url)
-        with open(zip_path, "wb") as f:
-            f.write(r.content)
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall()
-        os.remove(zip_path)
-        print("✅ 체크포인트 다운로드 완료!")
-
-download_checkpoints()
+from typing import List, Optional
+from analyze_image_skin_type import model_image
 
 app = FastAPI()
 
+# CORS 설정
 origins = [
     "http://localhost:3000",
     "https://jiwow-wow.github.io",
-    "https://front-seven-chi.vercel.app"  # ✅ 네 Vercel 프론트 주소 추가됨
+    "https://front-seven-chi.vercel.app"
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -43,8 +28,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 화장품 데이터 로드
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
+# 안전한 float 변환 함수
 def safe_float(val, default=0.0):
     try:
         if val is None or math.isnan(val) or math.isinf(val):
@@ -53,75 +40,90 @@ def safe_float(val, default=0.0):
     except:
         return default
 
-def recommend_products(result):
-    regions = result.get("regions", {})
-    skin_type = result.get("skin_type", "중성")
+# 새로운 추천 시스템
+from sklearn.preprocessing import StandardScaler
 
-    if not regions or not skin_type:
-        return []
-
-    try:
-        moisture_avg = safe_float(np.mean([
-            regions['이마']['수분'],
-            regions['왼쪽 볼']['수분'],
-            regions['오른쪽 볼']['수분'],
-            regions['턱']['수분']
-        ]))
-        elasticity_avg = safe_float(np.mean([
-            regions['이마']['탄력'],
-            regions['왼쪽 볼']['탄력'],
-            regions['오른쪽 볼']['탄력'],
-            regions['턱']['탄력']
-        ]))
-        pore_avg = safe_float(np.mean([
-            regions['왼쪽 볼']['모공 개수'],
-            regions['오른쪽 볼']['모공 개수']
-        ]))
-        pigment_avg = safe_float(regions['전체']['색소침착 개수'])
-    except:
-        return []
-
-    concern_scores = {
-        '모공': (pore_avg - 500) / 500 if pore_avg >= 500 else 0,
-        '주름': (50 - elasticity_avg) / 50 if elasticity_avg <= 50 else 0,
-        '수분': (55 - moisture_avg) / 55 if moisture_avg <= 55 else 0,
-        '색소침착': (pigment_avg - 130) / 130 if pigment_avg >= 130 else 0,
+def recommend_products(skin_type: str, regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
+    moisture_values = {
+        '이마': regions.get('이마', {}).get('수분', 0),
+        '왼쪽 볼': regions.get('왼쪽 볼', {}).get('수분', 0),
+        '오른쪽 볼': regions.get('오른쪽 볼', {}).get('수분', 0),
+        '턱': regions.get('턱', {}).get('수분', 0)
     }
-    user_concerns = [k for k, v in sorted(concern_scores.items(), key=lambda x: x[1], reverse=True) if v > 0]
+    elasticity_avg = np.mean([
+        regions.get('이마', {}).get('탄력', 0),
+        regions.get('왼쪽 볼', {}).get('탄력', 0),
+        regions.get('오른쪽 볼', {}).get('탄력', 0),
+        regions.get('턱', {}).get('탄력', 0)
+    ])
+    pore_avg = np.mean([
+        regions.get('왼쪽 볼', {}).get('모공 개수', 0),
+        regions.get('오른쪽 볼', {}).get('모공 개수', 0)
+    ])
+    pigment_avg = regions.get('전체', {}).get('색소침착 개수', 0)
+
+    low_moisture_vals = [v for v in moisture_values.values() if v < 62]
+    if len(low_moisture_vals) > 0:
+        low_moisture_avg = np.mean(low_moisture_vals)
+        moisture_score = (62 - low_moisture_avg) / 62
+    else:
+        moisture_score = 0
+
+    raw_scores = [
+        (pore_avg - 400) / 400 if pore_avg >= 400 else 0,
+        (50 - elasticity_avg) / 50 if elasticity_avg <= 50 else 0,
+        moisture_score,
+        (pigment_avg - 130) / 130 if pigment_avg >= 130 else 0
+    ]
+    concern_keys = ['모공', '탄력', '수분', '색소침착']
+
+    scaler = StandardScaler()
+    scaled_scores = scaler.fit_transform(np.array(raw_scores).reshape(-1, 1)).flatten()
+    concern_scores = dict(zip(concern_keys, scaled_scores))
+
+    if priority_concern:
+        priority_label = priority_concern[0]  # label
+        user_concerns = [priority_label]
+    else:
+        user_concerns = []
+
+    if user_selected_concerns is None:
+        user_selected_concerns = ['트러블']
 
     concern_keywords = {
-        '모공': ['모공', '피지','노폐물','피부결','각질'],
-        '주름': ['주름', '탄력','영양공급','피부활력','피부재생','나이트','아이'],
-        '수분': ['수분', '보습'],
-        '색소침착': ['미백', '브라이트닝', '비타민', '피부톤', '투명','트러블케어','피부재생','피부보호','스팟','저자극','진정']
+        '모공': ['모공관리', '모공케어', '피지조절', '노폐물제거', '안티폴루션','BHA', 'LHA'],
+        '탄력': ['피부탄력', '주름개선', '피부장벽강화', '피부재생', '영양공급', '앰플', '피부활력', '생기부여'],
+        '수분': ['수분공급', '보습', '고보습', '피부유연', '피부결정돈', '피부장벽강화', '멀티크림', '밤타입', '피부보호', '피부활력', '보습패드','AHA', 'PHA','유수분조절','유수분밸런스'],
+        '색소침착': ['비타민함유','AHA','스팟케어']
     }
-    exclude_keywords = {
-        '지성': ['페이스오일', '멀티밤', '보습크림', '나이트크림'],
-        '건성': ['워터토너', '브라이트닝'],
-        '복합건성': [],
-        '복합지성': [],
-        '중성': []
+    user_concern_keywords = {
+        '트러블': ['트러블케어', '약산성', '저자극', '민감성', '피지조절', '노폐물제거', '피부진정', '스팟케어', '피부재생', '오일프리', '안티폴루션','BHA', 'LHA'],
+        '피부톤': ['미백', '브라이트닝', '톤업', '피부톤보정', '투명피부', '광채', '생기부여', '피부활력', '비타민함유','다크서클완화','안티다크닝'],
+        '각질/피부결': ['각질관리', '각질케어', '피부결정돈', '피부유연', 'AHA', 'BHA', 'PHA', 'LHA', '피지조절', '보습', '고보습','노폐물제거', '피부장벽강화'],
+        '민감성': ['민감성', '저자극', '약산성', '피부진정', '피부보호', '클린뷰티', '피부장벽강화', '비건뷰티', '크루얼티프리','PHA', 'LHA','안티폴루션'],
+        '자외선 차단': ['자외선차단'],
+        '유기농': ['유기농화장품', '클린뷰티', '제로웨이스트', '친환경', '비건뷰티', '크루얼티프리', '한방화장품']
     }
 
     def score_product(row):
         tags = str(row['태그'])
-        detail = str(row.get('세부', ''))
+        tag_set = set([tag.strip() for tag in tags.split(',')])
         score = 0
-
-        for block_word in exclude_keywords.get(skin_type, []):
-            if block_word in detail or block_word in tags:
-                return -1
-
-        weights = [3, 2, 1]
-        for idx, concern in enumerate(user_concerns):
-            weight = weights[idx] if idx < len(weights) else 1
-            for keyword in concern_keywords.get(concern, []):
-                if keyword in tags:
-                    score += weight
+        for concern in concern_keywords:
+            for keyword in concern_keywords[concern]:
+                for tag in tag_set:
+                    if keyword == tag:
+                        if concern in user_concerns and any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
+                            score += 5
+                        elif concern in user_concerns:
+                            score += 3
+                        elif any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
+                            score += 2
+                        break
         return score
 
     products['score'] = products.apply(score_product, axis=1)
-    top5 = products[products['score'] >= 0].sort_values(by='score', ascending=False).head(5)
+    recommended = products[products['score'] > 0].sort_values(by='score', ascending=False).head(5)
 
     def safe_row(row):
         return {
@@ -132,19 +134,32 @@ def recommend_products(result):
             "이미지": str(row.get("이미지", ""))
         }
 
-    return [safe_row(row) for _, row in top5.iterrows()]
+    return [safe_row(row) for _, row in recommended.iterrows()]
 
+# ✅ 최종 API 엔드포인트
 @app.post("/analyze-recommend")
-async def analyze_and_recommend(file: UploadFile = File(...)):
+async def analyze_and_recommend(
+    file: UploadFile = File(...),
+    gender: str = Form(...),
+    age: int = Form(...),
+    concerns: Optional[str] = Form(None)  # JSON 문자열 형태로 받음
+):
     image_bytes = await file.read()
     try:
-        result = run_analysis(image_bytes)
-        recommended = recommend_products(result)
-
+        gender_age = f"{gender}_{(age // 10) * 10}대"
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        result = model_image(image, gender_age)
+        user_selected_concerns = json.loads(concerns) if concerns else None
+        recommended = recommend_products(
+            skin_type=result.get("skin_type"),
+            regions=result.get("regions"),
+            priority_concern=result.get("priority_concern"),
+            user_selected_concerns=user_selected_concerns
+        )
         response_data = {"analysis": result, "recommend": recommended}
         safe_json = json.dumps(response_data, ensure_ascii=False, allow_nan=False)
         return JSONResponse(content=json.loads(safe_json))
 
     except Exception as e:
-        print("🚨 직렬화 또는 처리 에러:", e)
+        print("🚨 처리 에러:", e)
         return JSONResponse(content={"error": str(e)}, status_code=500)
