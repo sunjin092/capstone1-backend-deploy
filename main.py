@@ -172,7 +172,7 @@ for idx, out_dim in enumerate(regression_num_output):
 def model_image(image: Image.Image, gender_age: str, average_data_path="average_data.csv") -> dict:
     image = ImageOps.exif_transpose(image.convert("RGB"))
     regions = crop_regions_by_ratio(image)
-    result = {"regions": {}, "z_scores": {}, "priority_concern": None}
+    result = {"regions": {}, "z_scores": {}, "z_score_avg": {}, "priority_concern": None}
 
     avg_data = load_average_data(average_data_path)
     if gender_age not in avg_data:
@@ -181,6 +181,7 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
     std_dict = avg_data[gender_age]["std"]
 
     z_score_list = []
+    label_z_dict = {}
 
     for idx in range(9):
         if reg_models[idx] is None or regions[idx] is None or idx in [3, 4]:
@@ -207,9 +208,13 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
                 z = compute_z_score(val, mean_dict[z_key], std_dict[z_key])
                 sub_zscore[label] = z
                 z_score_list.append((label, area_label[idx], z))
+                label_z_dict.setdefault(label, []).append(z)
         result["regions"][area_label[idx]] = sub_result
         if sub_zscore:
             result["z_scores"][area_label[idx]] = sub_zscore
+
+    result["z_score_avg"] = {label: round(np.mean(zlist), 2) for label, zlist in label_z_dict.items()}
+    print("그래프:", result["z_score_avg"])
 
     concerns = []
     for label, area, z in z_score_list:
@@ -225,25 +230,24 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
 # 화장품 CSV 로드
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
-# 추천 함수 정의
-def recommend_products(skin_type: str, regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
+def recommend_products(regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
     moisture_values = {
-        '이마': regions.get('이마', {}).get('수분', 0),
-        '왼쪽 볼': regions.get('왼쪽 볼', {}).get('수분', 0),
-        '오른쪽 볼': regions.get('오른쪽 볼', {}).get('수분', 0),
-        '턱': regions.get('턱', {}).get('수분', 0)
+        '이마': regions['이마']['수분'],
+        '왼쪽 볼': regions['왼쪽 볼']['수분'],
+        '오른쪽 볼': regions['오른쪽 볼']['수분'],
+        '턱': regions['턱']['수분']
     }
     elasticity_avg = np.mean([
-        regions.get('이마', {}).get('탄력', 0),
-        regions.get('왼쪽 볼', {}).get('탄력', 0),
-        regions.get('오른쪽 볼', {}).get('탄력', 0),
-        regions.get('턱', {}).get('탄력', 0)
+        regions['이마']['탄력'],
+        regions['왼쪽 볼']['탄력'],
+        regions['오른쪽 볼']['탄력'],
+        regions['턱']['탄력']
     ])
     pore_avg = np.mean([
-        regions.get('왼쪽 볼', {}).get('모공 개수', 0),
-        regions.get('오른쪽 볼', {}).get('모공 개수', 0)
+        regions['왼쪽 볼']['모공 개수'],
+        regions['오른쪽 볼']['모공 개수']
     ])
-    pigment_avg = regions.get('전체', {}).get('색소침착 개수', 0)
+    pigment_avg = regions['전체']['색소침착 개수']
 
     low_moisture_vals = [v for v in moisture_values.values() if v < 62]
     if len(low_moisture_vals) > 0:
@@ -319,13 +323,12 @@ def recommend_products(skin_type: str, regions: dict, priority_concern: Optional
 
     return [safe_row(row) for _, row in recommended.iterrows()]
 
-# ✅ 최종 API 엔드포인트
 @app.post("/analyze-recommend")
 async def analyze_and_recommend(
     file: UploadFile = File(...),
     gender: str = Form(...),
     age: int = Form(...),
-    concerns: Optional[str] = Form(None)  # JSON 문자열
+    concerns: Optional[str] = Form(None)
 ):
     image_bytes = await file.read()
     try:
@@ -335,7 +338,6 @@ async def analyze_and_recommend(
 
         user_selected_concerns = json.loads(concerns) if concerns else None
         recommended = recommend_products(
-            skin_type=None,
             regions=result.get("regions"),
             priority_concern=result.get("priority_concern"),
             user_selected_concerns=user_selected_concerns
@@ -343,11 +345,11 @@ async def analyze_and_recommend(
 
         response_data = {
             "analysis": result,
-            "recommend": recommended
+            "recommend": recommended,
+            "그래프": result.get("z_score_avg")
         }
 
-        safe_json = json.dumps(response_data, ensure_ascii=False, allow_nan=False)
-        return JSONResponse(content=json.loads(safe_json))
+        return JSONResponse(content=response_data)
 
     except Exception as e:
         print("🚨 처리 에러:", e)
