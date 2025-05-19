@@ -290,7 +290,7 @@ def recommend_products(skin_type: str, regions: dict, priority_concern: Optional
 
     def score_product(row):
         tags = str(row['태그'])
-        tag_set = set([tag.strip() for tag in tags.split(',')])
+        tag_set = set([tag.strip().replace("#", "") for tag in tags.split(',')])
         score = 0
         for concern in concern_keywords:
             for keyword in concern_keywords[concern]:
