@@ -329,7 +329,7 @@ async def analyze_and_recommend(
 ):
     image_bytes = await file.read()
     try:
-        gender_age = f"{gender}_{(age // 10) * 10}대"
+        gender_age = f"{gender}/{(age // 10) * 10}~{(age // 10) * 10 + 9}"
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         result = model_image(image, gender_age)
 
