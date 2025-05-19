@@ -140,6 +140,15 @@ def safe_float(val, default=0.0):
     except:
         return default
 
+def get_restore_stats():
+    return {
+        1: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9)},
+        5: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9), "모공 개수": "log"},
+        6: {"수분": (60.2, 9.6),  "탄력": (49.3, 12.1), "모공 개수": "log"},
+        8: {"수분": (61.3, 10.0), "탄력": (47.5, 12.0)},
+        0: {"색소침착 개수": 300}
+    }
+
 # 회귀 모델 로딩
 restore_stats = get_restore_stats()
 reg_models = []
