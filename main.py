@@ -258,7 +258,7 @@ def recommend_products(skin_type: str, regions: dict, priority_concern: Optional
         moisture_score,
         (pigment_avg - 130) / 130 if pigment_avg >= 130 else 0
     ]
-    concern_keys = ['모공', '탄력', '수분', '색소침착']
+    concern_keys = ['모공 개수', '탄력', '수분', '색소침착']
 
     scaler = StandardScaler()
     scaled_scores = scaler.fit_transform(np.array(raw_scores).reshape(-1, 1)).flatten()
@@ -274,7 +274,7 @@ def recommend_products(skin_type: str, regions: dict, priority_concern: Optional
         user_selected_concerns = ['트러블']
 
     concern_keywords = {
-        '모공': ['모공관리', '모공케어', '피지조절', '노폐물제거', '안티폴루션','BHA', 'LHA'],
+        '모공 개수': ['모공관리', '모공케어', '피지조절', '노폐물제거', '안티폴루션','BHA', 'LHA'],
         '탄력': ['피부탄력', '주름개선', '피부장벽강화', '피부재생', '영양공급', '앰플', '피부활력', '생기부여'],
         '수분': ['수분공급', '보습', '고보습', '피부유연', '피부결정돈', '피부장벽강화', '멀티크림', '밤타입', '피부보호', '피부활력', '보습패드','AHA', 'PHA','유수분조절','유수분밸런스'],
         '색소침착': ['비타민함유','AHA','스팟케어']
