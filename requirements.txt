@@ -9,3 +9,4 @@ scikit-learn
 Pillow
 mediapipe
 python-multipart
+opencv-python==999.999.999
