@@ -1,17 +1,24 @@
-# ✅ main.py (추천 시스템 완전 교체 + concerns 입력 연동)
+# ✅ main.py (CV 분석 + 추천 시스템 완전 통합)
 
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
+from PIL import Image, ImageOps
 import pandas as pd
 import json
 import io
 import numpy as np
 import math
+import os
+import torch
+import torch.nn as nn
+from torchvision import transforms, models
+import cv2
+import mediapipe as mp
 from typing import List, Optional
-from analyze_image_skin_type import model_image
+from sklearn.preprocessing import StandardScaler
 
+# FastAPI 앱 생성
 app = FastAPI()
 
 # CORS 설정
@@ -28,10 +35,103 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 화장품 데이터 로드
-products = pd.read_csv("Total_DB.csv", encoding='cp949')
+# 공통 설정
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+transform = transforms.Compose([
+    transforms.Resize((128, 128)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+])
 
-# 안전한 float 변환 함수
+regression_ckpt = os.path.join("checkpoint", "regression")
+regression_num_output = [1, 2, 0, 0, 0, 3, 3, 0, 2]
+area_label = {0: "전체", 1: "이마", 2: "미간", 3: "왼쪽 눈가", 4: "오른쪽 눈가", 5: "왼쪽 볼", 6: "오른쪽 볼", 7: "입술", 8: "턱"}
+reg_desc = {0: ["색소침착 개수"], 1: ["수분", "탄력"], 5: ["수분", "탄력", "모공 개수"], 6: ["수분", "탄력", "모공 개수"], 8: ["수분", "탄력"]}
+
+REGION_LANDMARKS = {
+    0: list(range(468)),
+    1: [10, 67, 69, 71, 109, 151, 337, 338, 297],
+    2: [168, 6, 197, 195, 5, 4],
+    3: [130, 133, 160, 159, 158],
+    4: [359, 362, 386, 385, 384],
+    5: [205, 50, 187, 201, 213],
+    6: [425, 280, 411, 427, 434],
+    7: [13, 14, 17, 84, 181],
+    8: [152, 377, 400, 378, 379]
+}
+
+def crop_regions_by_ratio(pil_img):
+    img = np.array(pil_img)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    h, w = img.shape[:2]
+    regions = [None] * 9
+    with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as face_mesh:
+        results = face_mesh.process(img_rgb)
+        if not results.multi_face_landmarks:
+            raise ValueError("❗ 얼굴을 찾을 수 없습니다.")
+        landmarks = results.multi_face_landmarks[0].landmark
+        points = np.array([(lm.x * w, lm.y * h) for lm in landmarks])
+        face_x1, face_y1 = np.min(points, axis=0)
+        face_x2, face_y2 = np.max(points, axis=0)
+        face_w, face_h = face_x2 - face_x1, face_y2 - face_y1
+        for idx, lm_indices in REGION_LANDMARKS.items():
+            pts = np.array([(landmarks[i].x * w, landmarks[i].y * h) for i in lm_indices])
+            cx, cy = np.mean(pts, axis=0)
+            if idx == 8: cx -= face_w * 0.15
+            if idx == 1:
+                box_w, box_h = int(face_w * 0.70), int(face_h * 0.3)
+                cy -= box_h * 0.2
+            elif idx == 2:
+                box_w, box_h = int(face_w * 0.35), int(face_h * 0.15)
+                cy -= box_h * 2.5
+            else:
+                box_w, box_h = int(face_w * 0.28), int(face_h * 0.25)
+            x1, y1 = max(int(cx - box_w / 2), 0), max(int(cy - box_h / 2), 0)
+            x2, y2 = min(int(cx + box_w / 2), w), min(int(cy + box_h / 2), h)
+            crop = img[y1:y2, x1:x2]
+            regions[idx] = Image.fromarray(crop)
+    return regions
+
+def load_average_data(path):
+    df = pd.read_csv(path, encoding='cp949')
+    avg_dict = {}
+    for _, row in df.iterrows():
+        key = row["성별"]
+        avg_dict[key] = {
+            "mean": {
+                "수분_이마": row["수분_이마"],
+                "수분_왼쪽 볼": row["수분_왼쪽 볼"],
+                "수분_오른쪽 볼": row["수분_오른쪽 볼"],
+                "수분_턱": row["수분_턱"],
+                "탄력_이마": row["탄력_이마"],
+                "탄력_왼쪽 볼": row["탄력_왼쪽 볼"],
+                "탄력_오른쪽 볼": row["탄력_오른쪽 볼"],
+                "탄력_턱": row["탄력_턱"],
+                "모공 개수_왼쪽 볼": row["모공 개수_왼쪽 볼"],
+                "모공 개수_오른쪽 볼": row["모공 개수_오른쪽 볼"],
+                "색소침착 개수_전체": row["색소침착 개수_전체"]
+            },
+            "std": {
+                "수분_이마": row["수분_이마_표준편차"],
+                "수분_왼쪽 볼": row["수분_왼쪽 볼_표준편차"],
+                "수분_오른쪽 볼": row["수분_오른쪽 볼_표준편차"],
+                "수분_턱": row["수분_턱_표준편차"],
+                "탄력_이마": row["탄력_이마_표준편차"],
+                "탄력_왼쪽 볼": row["탄력_왼쪽 볼_표준편차"],
+                "탄력_오른쪽 볼": row["탄력_오른쪽 볼_표준편차"],
+                "탄력_턱": row["탄력_턱_표준편차"],
+                "모공 개수_왼쪽 볼": row["모공 개수_왼쪽 볼_표준편차"],
+                "모공 개수_오른쪽 볼": row["모공 개수_오른쪽 볼_표준편차"],
+                "색소침착 개수_전체": row["색소침착 개수_전체_표준편차"]
+            }
+        }
+    return avg_dict
+
+def compute_z_score(value, mean, std):
+    if std == 0:
+        return 0
+    return round((value - mean) / std, 2)
+
 def safe_float(val, default=0.0):
     try:
         if val is None or math.isnan(val) or math.isinf(val):
@@ -40,9 +140,83 @@ def safe_float(val, default=0.0):
     except:
         return default
 
-# 새로운 추천 시스템
-from sklearn.preprocessing import StandardScaler
+# 회귀 모델 로딩
+restore_stats = get_restore_stats()
+reg_models = []
+for idx, out_dim in enumerate(regression_num_output):
+    if out_dim == 0:
+        reg_models.append(None)
+        continue
+    model = models.resnet50(weights=None)
+    model.fc = nn.Linear(model.fc.in_features, out_dim)
+    ckpt_path = os.path.join(regression_ckpt, str(idx), "state_dict.bin")
+    if os.path.exists(ckpt_path):
+        state = torch.load(ckpt_path, map_location=device)
+        if "model_state" in state:
+            state = state["model_state"]
+        model.load_state_dict(state, strict=False)
+        model.eval()
+        reg_models.append(model.to(device))
+    else:
+        reg_models.append(None)
 
+def model_image(image: Image.Image, gender_age: str, average_data_path="average_data.csv") -> dict:
+    image = ImageOps.exif_transpose(image.convert("RGB"))
+    regions = crop_regions_by_ratio(image)
+    result = {"regions": {}, "z_scores": {}, "priority_concern": None}
+
+    avg_data = load_average_data(average_data_path)
+    if gender_age not in avg_data:
+        raise ValueError(f"❗ 평균 데이터에 '{gender_age}' 항목이 없습니다.")
+    mean_dict = avg_data[gender_age]["mean"]
+    std_dict = avg_data[gender_age]["std"]
+
+    z_score_list = []
+
+    for idx in range(9):
+        if reg_models[idx] is None or regions[idx] is None or idx in [3, 4]:
+            continue
+        crop_tensor = transform(regions[idx]).unsqueeze(0).to(device)
+        with torch.no_grad():
+            output = reg_models[idx](crop_tensor).squeeze().cpu().numpy()
+        if output.ndim == 0:
+            output = [output]
+        sub_result, sub_zscore = {}, {}
+        for i, val in enumerate(output):
+            label = reg_desc[idx][i]
+            if label == "모공 개수" and restore_stats[idx].get(label) == "log":
+                val = np.clip(np.exp(val) - 1, 0, 2500)
+            elif isinstance(restore_stats[idx].get(label), tuple):
+                mean, std = restore_stats[idx][label]
+                val = val * std + mean
+            elif label == "색소침착 개수":
+                val *= 300
+            val = float(val)
+            sub_result[label] = round(val, 2)
+            z_key = f"{label}_{area_label[idx]}" if label != "색소침착 개수" else "색소침착 개수_전체"
+            if z_key in mean_dict:
+                z = compute_z_score(val, mean_dict[z_key], std_dict[z_key])
+                sub_zscore[label] = z
+                z_score_list.append((label, area_label[idx], z))
+        result["regions"][area_label[idx]] = sub_result
+        if sub_zscore:
+            result["z_scores"][area_label[idx]] = sub_zscore
+
+    concerns = []
+    for label, area, z in z_score_list:
+        if label in ["수분", "탄력"] and z < -0.2:
+            concerns.append((label, area, z))
+        elif label in ["모공 개수", "색소침착 개수"] and z > 0.2:
+            concerns.append((label, area, z))
+    if concerns:
+        result["priority_concern"] = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)[0]
+
+    return result
+
+# 화장품 CSV 로드
+products = pd.read_csv("Total_DB.csv", encoding='cp949')
+
+# 추천 함수 정의
 def recommend_products(skin_type: str, regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
     moisture_values = {
         '이마': regions.get('이마', {}).get('수분', 0),
@@ -82,7 +256,7 @@ def recommend_products(skin_type: str, regions: dict, priority_concern: Optional
     concern_scores = dict(zip(concern_keys, scaled_scores))
 
     if priority_concern:
-        priority_label = priority_concern[0]  # label
+        priority_label = priority_concern[0]
         user_concerns = [priority_label]
     else:
         user_concerns = []
@@ -142,21 +316,27 @@ async def analyze_and_recommend(
     file: UploadFile = File(...),
     gender: str = Form(...),
     age: int = Form(...),
-    concerns: Optional[str] = Form(None)  # JSON 문자열 형태로 받음
+    concerns: Optional[str] = Form(None)  # JSON 문자열
 ):
     image_bytes = await file.read()
     try:
         gender_age = f"{gender}_{(age // 10) * 10}대"
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         result = model_image(image, gender_age)
+
         user_selected_concerns = json.loads(concerns) if concerns else None
         recommended = recommend_products(
-            skin_type=result.get("skin_type"),
+            skin_type=None,
             regions=result.get("regions"),
             priority_concern=result.get("priority_concern"),
             user_selected_concerns=user_selected_concerns
         )
-        response_data = {"analysis": result, "recommend": recommended}
+
+        response_data = {
+            "analysis": result,
+            "recommend": recommended
+        }
+
         safe_json = json.dumps(response_data, ensure_ascii=False, allow_nan=False)
         return JSONResponse(content=json.loads(safe_json))
 

@@ -3,11 +3,9 @@ torchvision
 fastapi
 uvicorn
 pandas
+numpy
 opencv-python-headless==4.5.5.64
-matplotlib
 scikit-learn
 Pillow
 mediapipe
-requests
-gdown
 python-multipart
