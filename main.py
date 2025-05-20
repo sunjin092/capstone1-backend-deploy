@@ -46,7 +46,7 @@ transform = transforms.Compose([
 regression_ckpt = os.path.join("checkpoint", "regression")
 regression_num_output = [1, 2, 0, 0, 0, 3, 3, 0, 2]
 area_label = {0: "전체", 1: "이마", 2: "미간", 3: "왼쪽 눈가", 4: "오른쪽 눈가", 5: "왼쪽 볼", 6: "오른쪽 볼", 7: "입술", 8: "턱"}
-reg_desc = {0: ["색소침착 개수"], 1: ["수분", "탄력"], 5: ["수분", "탄력", "모공 개수"], 6: ["수분", "탄력", "모공 개수"], 8: ["수분", "탄력"]}
+reg_desc = {0: ["색소침착"], 1: ["수분", "탄력"], 5: ["수분", "탄력", "모공"], 6: ["수분", "탄력", "모공"], 8: ["수분", "탄력"]}
 
 REGION_LANDMARKS = {
     0: list(range(468)),
@@ -107,9 +107,9 @@ def load_average_data(path):
                 "탄력_왼쪽 볼": row["탄력_왼쪽 볼"],
                 "탄력_오른쪽 볼": row["탄력_오른쪽 볼"],
                 "탄력_턱": row["탄력_턱"],
-                "모공 개수_왼쪽 볼": row["모공 개수_왼쪽 볼"],
-                "모공 개수_오른쪽 볼": row["모공 개수_오른쪽 볼"],
-                "색소침착 개수_전체": row["색소침착 개수_전체"]
+                "모공_왼쪽 볼": row["모공_왼쪽 볼"],
+                "모공_오른쪽 볼": row["모공_오른쪽 볼"],
+                "색소침착_전체": row["색소침착_전체"]
             },
             "std": {
                 "수분_이마": row["수분_이마_표준편차"],
@@ -120,9 +120,9 @@ def load_average_data(path):
                 "탄력_왼쪽 볼": row["탄력_왼쪽 볼_표준편차"],
                 "탄력_오른쪽 볼": row["탄력_오른쪽 볼_표준편차"],
                 "탄력_턱": row["탄력_턱_표준편차"],
-                "모공 개수_왼쪽 볼": row["모공 개수_왼쪽 볼_표준편차"],
-                "모공 개수_오른쪽 볼": row["모공 개수_오른쪽 볼_표준편차"],
-                "색소침착 개수_전체": row["색소침착 개수_전체_표준편차"]
+                "모공_왼쪽 볼": row["모공_왼쪽 볼_표준편차"],
+                "모공_오른쪽 볼": row["모공_오른쪽 볼_표준편차"],
+                "색소침착_전체": row["색소침착_전체_표준편차"]
             }
         }
     return avg_dict
@@ -143,10 +143,10 @@ def safe_float(val, default=0.0):
 def get_restore_stats():
     return {
         1: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9)},
-        5: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9), "모공 개수": "log"},
-        6: {"수분": (60.2, 9.6),  "탄력": (49.3, 12.1), "모공 개수": "log"},
+        5: {"수분": (60.6, 10.1), "탄력": (48.7, 11.9), "모공": "log"},
+        6: {"수분": (60.2, 9.6),  "탄력": (49.3, 12.1), "모공": "log"},
         8: {"수분": (61.3, 10.0), "탄력": (47.5, 12.0)},
-        0: {"색소침착 개수": 300}
+        0: {"색소침착": 300}
     }
 
 # 회귀 모델 로딩
@@ -195,12 +195,12 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
         sub_result, sub_zscore = {}, {}
         for i, val in enumerate(output):
             label = reg_desc[idx][i]
-            if label == "모공 개수" and restore_stats[idx].get(label) == "log":
+            if label == "모공" and restore_stats[idx].get(label) == "log":
                 val = np.clip(np.exp(val) - 1, 0, 2500)
             elif isinstance(restore_stats[idx].get(label), tuple):
                 mean, std = restore_stats[idx][label]
                 val = val * std + mean
-            elif label == "색소침착 개수":
+            elif label == "색소침착":
                 val *= 300
             val = float(val)
             sub_result[label] = round(val, 2)
@@ -220,7 +220,7 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
     for label, area, z in z_score_list:
         if label in ["수분", "탄력"] and z < -0.2:
             concerns.append((label, area, z))
-        elif label in ["모공 개수", "색소침착 개수"] and z > 0.2:
+        elif label in ["모공", "색소침착"] and z > 0.2:
             concerns.append((label, area, z))
     if concerns:
         result["priority_concern"] = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)[0]
@@ -235,7 +235,7 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
 
     if priority_concern:
         priority_label = priority_concern[0]
-        user_concerns = [priority_label]
+        user_concerns = [x[0] for x in priority_concern]
     else:
         user_concerns = []
 
@@ -265,9 +265,10 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
         filtered_products = products[products['태그'].apply(lambda t: any(kw in str(t) for kw in concern_keywords_flat))]
 
 
-    def score_product(row):
+    def score_product(row, user_concerns, user_selected_concerns):
         tags = str(row['태그'])
         tag_set = set([tag.strip().replace("#", "") for tag in tags.split(',')])
+        
         score = 0
         for concern in concern_keywords:
             for keyword in concern_keywords[concern]:
@@ -279,10 +280,17 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
                     elif any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
                         score += 2
                     break
-        return score
+        return int(score)
 
-    filtered_products['score'] = filtered_products.apply(score_product, axis=1)
+    filtered_products['score'] = filtered_products.apply(lambda row: score_product(row, user_concerns, user_selected_concerns), axis=1
+)   
     recommended = filtered_products[filtered_products['score'] > 0].sort_values(by='score', ascending=False).head(5)
+    
+    if len(recommended) == 0 and user_concerns:
+        products['score'] = products.apply(
+    lambda row: score_product(row, user_concerns, []), axis=1
+)
+        recommended = products[products["score"] > 0].sort_values(by="score", ascending=False).head(5)
     
     def safe_row(row):
         return {
@@ -296,16 +304,29 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
 
     return [safe_row(row) for _, row in recommended.iterrows()]
 
+def map_to_csv_key(gender: str, age_group: str) -> str:
+    age_map = {
+        "10대": "10~19",
+        "20대": "20~29",
+        "30대": "30~39",
+        "40대": "40~49",
+        "50대": "50~59",
+        "60대 이상": "60~69"
+    }
+    if age_group not in age_map:
+        raise ValueError(f"❗ 올바르지 않은 연령대 입력: {age_group}")
+    return f"{gender}/{age_map[age_group]}"
+
 @app.post("/analyze-recommend")
 async def analyze_and_recommend(
     file: UploadFile = File(...),
     gender: str = Form(...),
-    age: int = Form(...),
+    age_group: str = Form(...),
     concerns: Optional[str] = Form(None)
 ):
     image_bytes = await file.read()
     try:
-        gender_age = f"{gender}/{(age // 10) * 10}~{(age // 10) * 10 + 9}"
+        gender_age = map_to_csv_key(gender, age_group)
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         result = model_image(image, gender_age)
 
