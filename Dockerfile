@@ -1,5 +1,8 @@
 FROM python:3.10
 
+# 👇 OpenCV 라이브러리 설치
+RUN apt-get update && apt-get install -y libgl1
+
 WORKDIR /app
 
 COPY . .
