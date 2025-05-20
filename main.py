@@ -233,9 +233,10 @@ products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
 def recommend_products(regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
 
+    # ✅ priority_concern은 단일 튜플이므로, 안전하게 첫 번째 요소만 추출
     if priority_concern:
         priority_label = priority_concern[0]
-        user_concerns = [x[0] for x in priority_concern]
+        user_concerns = [priority_label]
     else:
         user_concerns = []
 
@@ -257,13 +258,13 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
         '유기농': ['유기농화장품', '클린뷰티', '제로웨이스트', '친환경', '비건뷰티', '크루얼티프리', '한방화장품']
     }
 
+    # 사용자 고민 기반 1차 필터링
     filtered_products = products.copy()
     if user_selected_concerns:
         concern_keywords_flat = set()
         for u in user_selected_concerns:
             concern_keywords_flat.update(user_concern_keywords.get(u, []))
         filtered_products = products[products['태그'].apply(lambda t: any(kw in str(t) for kw in concern_keywords_flat))]
-
 
     def score_product(row, user_concerns, user_selected_concerns):
         tags = str(row['태그'])
@@ -282,16 +283,15 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
                     break
         return int(score)
 
-    filtered_products['score'] = filtered_products.apply(lambda row: score_product(row, user_concerns, user_selected_concerns), axis=1
-)   
+    # 점수 계산 및 추천 추출
+    filtered_products['score'] = filtered_products.apply(lambda row: score_product(row, user_concerns, user_selected_concerns), axis=1)
     recommended = filtered_products[filtered_products['score'] > 0].sort_values(by='score', ascending=False).head(5)
-    
+
+    # 점수 0개면 fallback
     if len(recommended) == 0 and user_concerns:
-        products['score'] = products.apply(
-    lambda row: score_product(row, user_concerns, []), axis=1
-)
+        products['score'] = products.apply(lambda row: score_product(row, user_concerns, []), axis=1)
         recommended = products[products["score"] > 0].sort_values(by="score", ascending=False).head(5)
-    
+
     def safe_row(row):
         return {
             "브랜드": str(row.get("브랜드", "")),
@@ -303,6 +303,7 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
         }
 
     return [safe_row(row) for _, row in recommended.iterrows()]
+
 
 def map_to_csv_key(gender: str, age_group: str) -> str:
     age_map = {
