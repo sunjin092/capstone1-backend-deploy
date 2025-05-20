@@ -172,6 +172,7 @@ for idx, out_dim in enumerate(regression_num_output):
 def model_image(image: Image.Image, gender_age: str, average_data_path="average_data.csv") -> dict:
     image = ImageOps.exif_transpose(image.convert("RGB"))
     regions = crop_regions_by_ratio(image)
+
     result = {"regions": {}, "z_scores": {}, "z_score_avg": {}, "priority_concern": None}
 
     avg_data = load_average_data(average_data_path)
@@ -203,7 +204,7 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
                 val *= 300
             val = float(val)
             sub_result[label] = round(val, 2)
-            z_key = f"{label}_{area_label[idx]}" if label != "색소침착 개수" else "색소침착 개수_전체"
+            z_key = f"{label}_{area_label[idx]}" 
             if z_key in mean_dict:
                 z = compute_z_score(val, mean_dict[z_key], std_dict[z_key])
                 sub_zscore[label] = z
@@ -225,48 +226,13 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
     if concerns:
         result["priority_concern"] = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)[0]
 
+ 
     return result
 
 # 화장품 CSV 로드
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
 def recommend_products(regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
-    moisture_values = {
-        '이마': regions['이마']['수분'],
-        '왼쪽 볼': regions['왼쪽 볼']['수분'],
-        '오른쪽 볼': regions['오른쪽 볼']['수분'],
-        '턱': regions['턱']['수분']
-    }
-    elasticity_avg = np.mean([
-        regions['이마']['탄력'],
-        regions['왼쪽 볼']['탄력'],
-        regions['오른쪽 볼']['탄력'],
-        regions['턱']['탄력']
-    ])
-    pore_avg = np.mean([
-        regions['왼쪽 볼']['모공 개수'],
-        regions['오른쪽 볼']['모공 개수']
-    ])
-    pigment_avg = regions['전체']['색소침착 개수']
-
-    low_moisture_vals = [v for v in moisture_values.values() if v < 62]
-    if len(low_moisture_vals) > 0:
-        low_moisture_avg = np.mean(low_moisture_vals)
-        moisture_score = (62 - low_moisture_avg) / 62
-    else:
-        moisture_score = 0
-
-    raw_scores = [
-        (pore_avg - 400) / 400 if pore_avg >= 400 else 0,
-        (50 - elasticity_avg) / 50 if elasticity_avg <= 50 else 0,
-        moisture_score,
-        (pigment_avg - 130) / 130 if pigment_avg >= 130 else 0
-    ]
-    concern_keys = ['모공 개수', '탄력', '수분', '색소침착']
-
-    scaler = StandardScaler()
-    scaled_scores = scaler.fit_transform(np.array(raw_scores).reshape(-1, 1)).flatten()
-    concern_scores = dict(zip(concern_keys, scaled_scores))
 
     if priority_concern:
         priority_label = priority_concern[0]
@@ -275,22 +241,30 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
         user_concerns = []
 
     if user_selected_concerns is None:
-        user_selected_concerns = ['트러블']
+        user_selected_concerns = []
 
     concern_keywords = {
         '모공 개수': ['모공관리', '모공케어', '피지조절', '노폐물제거', '안티폴루션','BHA', 'LHA'],
         '탄력': ['피부탄력', '주름개선', '피부장벽강화', '피부재생', '영양공급', '앰플', '피부활력', '생기부여'],
         '수분': ['수분공급', '보습', '고보습', '피부유연', '피부결정돈', '피부장벽강화', '멀티크림', '밤타입', '피부보호', '피부활력', '보습패드','AHA', 'PHA','유수분조절','유수분밸런스'],
-        '색소침착': ['비타민함유','AHA','스팟케어']
+        '색소침착': ['기능성','비타민함유','AHA','스팟케어']
     }
     user_concern_keywords = {
-        '트러블': ['트러블케어', '약산성', '저자극', '민감성', '피지조절', '노폐물제거', '피부진정', '스팟케어', '피부재생', '오일프리', '안티폴루션','BHA', 'LHA'],
-        '피부톤': ['미백', '브라이트닝', '톤업', '피부톤보정', '투명피부', '광채', '생기부여', '피부활력', '비타민함유','다크서클완화','안티다크닝'],
+        '트러블': ['기능성','트러블케어', '약산성', '저자극', '민감성', '피지조절', '노폐물제거', '피부진정', '스팟케어', '피부재생', '오일프리', '안티폴루션','BHA', 'LHA'],
+        '피부톤': ['미백', '브라이트닝', '톤업', '피부톤보정', '피부투명', '광채', '생기부여', '피부활력', '비타민함유','다크서클완화','안티다크닝'],
         '각질/피부결': ['각질관리', '각질케어', '피부결정돈', '피부유연', 'AHA', 'BHA', 'PHA', 'LHA', '피지조절', '보습', '고보습','노폐물제거', '피부장벽강화'],
         '민감성': ['민감성', '저자극', '약산성', '피부진정', '피부보호', '클린뷰티', '피부장벽강화', '비건뷰티', '크루얼티프리','PHA', 'LHA','안티폴루션'],
         '자외선 차단': ['자외선차단'],
         '유기농': ['유기농화장품', '클린뷰티', '제로웨이스트', '친환경', '비건뷰티', '크루얼티프리', '한방화장품']
     }
+
+    filtered_products = products.copy()
+    if user_selected_concerns:
+        concern_keywords_flat = set()
+        for u in user_selected_concerns:
+            concern_keywords_flat.update(user_concern_keywords.get(u, []))
+        filtered_products = products[products['태그'].apply(lambda t: any(kw in str(t) for kw in concern_keywords_flat))]
+
 
     def score_product(row):
         tags = str(row['태그'])
@@ -298,26 +272,25 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
         score = 0
         for concern in concern_keywords:
             for keyword in concern_keywords[concern]:
-                for tag in tag_set:
-                    if keyword == tag:
-                        if concern in user_concerns and any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
-                            score += 5
-                        elif concern in user_concerns:
-                            score += 3
-                        elif any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
-                            score += 2
-                        break
+                if keyword in tag_set:
+                    if concern in user_concerns and any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
+                        score += 5
+                    elif concern in user_concerns:
+                        score += 3
+                    elif any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
+                        score += 2
+                    break
         return score
 
-    products['score'] = products.apply(score_product, axis=1)
-    recommended = products[products['score'] > 0].sort_values(by='score', ascending=False).head(5)
-
+    filtered_products['score'] = filtered_products.apply(score_product, axis=1)
+    recommended = filtered_products[filtered_products['score'] > 0].sort_values(by='score', ascending=False).head(5)
+    
     def safe_row(row):
         return {
             "브랜드": str(row.get("브랜드", "")),
             "제품명": str(row.get("제품명", "")),
             "용량/가격": str(row.get("용량/가격", "")),
-            "별점": safe_float(row.get("별점", 0.0)),
+            "별점": str(row.get("별점", "")),
             "이미지": str(row.get("이미지", ""))
         }
 
