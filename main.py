@@ -215,7 +215,6 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
             result["z_scores"][area_label[idx]] = sub_zscore
 
     result["z_score_avg"] = {label: round(np.mean(zlist), 2) for label, zlist in label_z_dict.items()}
-    print("그래프:", result["z_score_avg"])
 
     concerns = []
     for label, area, z in z_score_list:
@@ -291,7 +290,8 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
             "제품명": str(row.get("제품명", "")),
             "용량/가격": str(row.get("용량/가격", "")),
             "별점": str(row.get("별점", "")),
-            "이미지": str(row.get("이미지", ""))
+            "이미지": str(row.get("이미지", "")),
+            "태그": [tag.strip().replace("#", "") for tag in str(row.get("태그", "")).split(",") if tag.strip()]
         }
 
     return [safe_row(row) for _, row in recommended.iterrows()]
