@@ -307,6 +307,12 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
 
 
 def map_to_csv_key(gender: str, age_group: str) -> str:
+    gender_map = {
+        "여": "여성",
+        "남": "남성",
+        "여성": "여성",
+        "남성": "남성"
+    }
     age_map = {
         "10대": "10~19",
         "20대": "20~29",
@@ -315,9 +321,12 @@ def map_to_csv_key(gender: str, age_group: str) -> str:
         "50대": "50~59",
         "60대 이상": "60~69"
     }
-    if age_group not in age_map:
-        raise ValueError(f"❗ 올바르지 않은 연령대 입력: {age_group}")
-    return f"{gender}/{age_map[age_group]}"
+
+    if gender not in gender_map or age_group not in age_map:
+        raise ValueError(f"❗ 잘못된 입력: gender={gender}, age_group={age_group}")
+
+    return f"{gender_map[gender]}/{age_map[age_group]}"
+
 
 @app.post("/analyze-recommend")
 async def analyze_and_recommend(
