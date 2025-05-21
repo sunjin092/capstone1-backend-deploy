@@ -300,7 +300,7 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
             "용량/가격": str(row.get("용량/가격", "")),
             "별점": str(row.get("별점", "")),
             "이미지": str(row.get("이미지", "")),
-            "제품링크": str(row.get("제품 링크", "")),
+            "제품링크": str(row.get("제품링크", "")),
             "태그": [tag.strip().replace("#", "") for tag in str(row.get("태그", "")).split(",") if tag.strip()]
         }
 
