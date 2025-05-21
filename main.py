@@ -17,6 +17,7 @@ import cv2
 import mediapipe as mp
 from typing import List, Optional
 from sklearn.preprocessing import StandardScaler
+from typing import List
 
 # FastAPI 앱 생성
 app = FastAPI()
@@ -323,7 +324,7 @@ async def analyze_and_recommend(
     file: UploadFile = File(...),
     gender: str = Form(...),
     age_group: str = Form(...),
-    concerns: Optional[str] = Form(None)
+    concerns: Optional[List[str]] = Form(None)  # ✅ 배열로 받기
 ):
     image_bytes = await file.read()
     try:
@@ -331,11 +332,10 @@ async def analyze_and_recommend(
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         result = model_image(image, gender_age)
 
-        user_selected_concerns = json.loads(concerns) if concerns else None
         recommended = recommend_products(
             regions=result.get("regions"),
             priority_concern=result.get("priority_concern"),
-            user_selected_concerns=user_selected_concerns
+            user_selected_concerns=concerns  # ✅ 그대로 전달
         )
 
         response_data = {
