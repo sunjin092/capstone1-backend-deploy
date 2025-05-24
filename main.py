@@ -150,6 +150,18 @@ def get_restore_stats():
         0: {"색소침착": 300}
     }
 
+def get_second_concern(z_score_avg: dict) -> Optional[str]:
+    concerns = []
+    for label, z in z_score_avg.items():
+        if label in ["수분", "탄력"] and z < -0.2:
+            concerns.append((label, z))
+        elif label in ["모공", "색소침착"] and z > 0.2:
+            concerns.append((label, z))
+    if concerns:
+        sorted_concerns = sorted(concerns, key=lambda x: abs(x[1]), reverse=True)
+        return sorted_concerns[0][0]  # 가장 나쁜 label만 반환
+    return None
+
 # 회귀 모델 로딩
 restore_stats = get_restore_stats()
 reg_models = []
@@ -224,17 +236,18 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
         elif label in ["모공", "색소침착"] and z > 0.2:
             concerns.append((label, area, z))
     if concerns:
-        result["priority_concern"] = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)[0]
-
- 
+        sorted_concerns = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)
+        result["priority_concern"] = sorted_concerns[:1]
+    
+    result["second_concern"] = get_second_concern(result["z_score_avg"])
+    
     return result
 
 # 화장품 CSV 로드
 products = pd.read_csv("Total_DB.csv", encoding='cp949')
 
-def recommend_products(regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None):
+def recommend_products(regions: dict, priority_concern: Optional[tuple], user_selected_concerns: Optional[List[str]] = None, second_concern: Optional[str] = None):
 
-    # ✅ priority_concern은 단일 튜플이므로, 안전하게 첫 번째 요소만 추출
     if priority_concern:
         priority_label = priority_concern[0]
         user_concerns = [priority_label]
@@ -267,32 +280,43 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
             concern_keywords_flat.update(user_concern_keywords.get(u, []))
         filtered_products = products[products['태그'].apply(lambda t: any(kw in str(t) for kw in concern_keywords_flat))]
 
-    def score_product(row, user_concerns, user_selected_concerns):
+    def score_product(row, user_concerns, user_selected_concerns, second_concern):
         tags = str(row['태그'])
         tag_set = set([tag.strip().replace("#", "") for tag in tags.split(',')])
         
         score = 0
-        for concern in concern_keywords:
-            for keyword in concern_keywords[concern]:
-                if keyword in tag_set:
-                    if concern in user_concerns and any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
-                        score += 5
-                    elif concern in user_concerns:
-                        score += 3
-                    elif any(keyword in user_concern_keywords.get(u, []) for u in user_selected_concerns):
-                        score += 2
-                    break
-        return int(score)
+
+        for concern, keywords in concern_keywords.items():
+            if any(kw in tag_set for kw in keywords):
+                weight = 0
+                if concern in user_concerns:
+                    weight += 5
+                if second_concern and concern == second_concern and concern not in user_concerns:
+                    weight += 3
+                if any(
+                user_kw in user_concern_keywords.get(u, [])
+                for user_kw in keywords
+                for u in user_selected_concerns
+                ):
+                    weight += 2
+                score += weight
+        return score
 
     # 점수 계산 및 추천 추출
-    filtered_products['score'] = filtered_products.apply(lambda row: score_product(row, user_concerns, user_selected_concerns), axis=1)
+    filtered_products['score'] = filtered_products.apply(
+    lambda row: score_product(row, user_concerns, user_selected_concerns, second_concern),
+    axis=1
+)      
     recommended = filtered_products[filtered_products['score'] > 0].sort_values(by='score', ascending=False).head(5)
 
     # 점수 0개면 fallback
-    if len(recommended) == 0 and user_concerns:
-        products['score'] = products.apply(lambda row: score_product(row, user_concerns, []), axis=1)
+    if len(recommended) <= 4 and user_concerns:
+        products['score'] = products.apply(
+        lambda row: score_product(row, user_concerns, [], second_concern),
+        axis=1
+    )
         recommended = products[products["score"] > 0].sort_values(by="score", ascending=False).head(5)
-
+ 
     def safe_row(row):
         return {
             "브랜드": str(row.get("브랜드", "")),
@@ -345,7 +369,8 @@ async def analyze_and_recommend(
         recommended = recommend_products(
             regions=result.get("regions"),
             priority_concern=result.get("priority_concern"),
-            user_selected_concerns=concerns  # ✅ 그대로 전달
+            user_selected_concerns=concerns,  # ✅ 그대로 전달
+            second_concern=result.get("second_concern")
         )
 
         response_data = {
