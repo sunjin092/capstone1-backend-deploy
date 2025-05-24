@@ -236,8 +236,8 @@ def model_image(image: Image.Image, gender_age: str, average_data_path="average_
         elif label in ["모공", "색소침착"] and z > 0.2:
             concerns.append((label, area, z))
     if concerns:
-        sorted_concerns = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)
-        result["priority_concern"] = sorted_concerns[:1]
+        result["priority_concern"] = sorted(concerns, key=lambda x: abs(x[2]), reverse=True)[0]
+
     
     result["second_concern"] = get_second_concern(result["z_score_avg"])
     
