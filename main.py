@@ -261,10 +261,10 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
         '모공': ['모공관리', '모공케어', '피지조절', '노폐물제거', '안티폴루션','BHA', 'LHA'],
         '탄력': ['피부탄력', '주름개선', '피부장벽강화', '피부재생', '영양공급', '앰플', '피부활력', '생기부여'],
         '수분': ['수분공급', '보습', '고보습', '피부유연', '피부결정돈', '피부장벽강화', '멀티크림', '밤타입', '피부보호', '피부활력', '보습패드','AHA', 'PHA','유수분조절','유수분밸런스'],
-        '색소침착': ['기능성','비타민함유','AHA','스팟케어']
+        '색소침착': ['비타민함유','AHA','스팟케어','미백','톤업','트러블케어']
     }
     user_concern_keywords = {
-        '트러블': ['기능성','트러블케어', '약산성', '저자극', '민감성', '피지조절', '노폐물제거', '피부진정', '스팟케어', '피부재생', '오일프리', '안티폴루션','BHA', 'LHA'],
+        '트러블': ['트러블케어', '약산성', '저자극', '민감성', '피지조절', '노폐물제거', '피부진정', '스팟케어', '피부재생', '오일프리', '안티폴루션','BHA', 'LHA'],
         '피부톤': ['미백', '브라이트닝', '톤업', '피부톤보정', '피부투명', '광채', '생기부여', '피부활력', '비타민함유','다크서클완화','안티다크닝'],
         '각질/피부결': ['각질관리', '각질케어', '피부결정돈', '피부유연', 'AHA', 'BHA', 'PHA', 'LHA', '피지조절', '보습', '고보습','노폐물제거', '피부장벽강화'],
         '민감성': ['민감성', '저자극', '약산성', '피부진정', '피부보호', '클린뷰티', '피부장벽강화', '비건뷰티', '크루얼티프리','PHA', 'LHA','안티폴루션'],
@@ -307,7 +307,7 @@ def recommend_products(regions: dict, priority_concern: Optional[tuple], user_se
     lambda row: score_product(row, user_concerns, user_selected_concerns, second_concern),
     axis=1
 )      
-    recommended = filtered_products[filtered_products['score'] > 0].sort_values(by='score', ascending=False).head(5)
+    recommended = filtered_products[filtered_products['score'] > 0].sort_values(by=["score",'별점'], ascending=[False,False]).head(5)
 
     # 점수 0개면 fallback
     if len(recommended) <= 4 and user_concerns:
