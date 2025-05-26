@@ -344,7 +344,7 @@ def map_to_csv_key(gender: str, age_group: str) -> str:
         "30대": "30~39",
         "40대": "40~49",
         "50대": "50~59",
-        "60대 이상": "60~69"
+        "60대": "60~69"
     }
 
     if gender not in gender_map or age_group not in age_map:
