@@ -26,7 +26,7 @@ app = FastAPI()
 origins = [
     "http://localhost:3000",
     "https://jiwow-wow.github.io",
-    "https://front-seven-chi.vercel.app"
+    "https://front-omega-ochre.vercel.app"
 ]
 app.add_middleware(
     CORSMiddleware,
